@@ -43,26 +43,46 @@ export default function App() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       try {
-        const parsed: SavedSettings = JSON.parse(raw);
-        // Ensure default playlist is loaded if somehow emptied
-        if (!parsed.playlists) {
-          parsed.playlists = [];
-        }
-        setSettings(parsed);
-        // Set first playlist as selected by default
-        if (parsed.playlists.length > 0) {
-          setSelectedPlaylistId(parsed.playlists[0].id);
+        const parsed = JSON.parse(raw) as Partial<SavedSettings>;
+        
+        // Comprehensive fallback merging to prevent crashes on undefined arrays/objects
+        const mergedSettings: SavedSettings = {
+          theme: parsed.theme || DEFAULT_SETTINGS.theme,
+          favorites: Array.isArray(parsed.favorites) ? parsed.favorites : DEFAULT_SETTINGS.favorites,
+          recentChannels: Array.isArray(parsed.recentChannels) ? parsed.recentChannels : DEFAULT_SETTINGS.recentChannels,
+          playlists: Array.isArray(parsed.playlists) && parsed.playlists.length > 0
+            ? parsed.playlists 
+            : [DEFAULT_SAMPLE_PLAYLIST],
+          playerPrefs: {
+            ...DEFAULT_PREFERENCES,
+            ...(parsed.playerPrefs || {})
+          }
+        };
+
+        setSettings(mergedSettings);
+
+        // Always make sure a valid playlist is selected
+        if (mergedSettings.playlists.length > 0) {
+          setSelectedPlaylistId(mergedSettings.playlists[0].id);
         } else {
-          setSelectedPlaylistId('');
+          setSelectedPlaylistId(DEFAULT_SAMPLE_PLAYLIST.id);
         }
       } catch (err) {
         console.error('Failed to parse local storage, loading clean defaults.', err);
-        setSettings(DEFAULT_SETTINGS);
-        setSelectedPlaylistId('');
+        const initialSettings: SavedSettings = {
+          ...DEFAULT_SETTINGS,
+          playlists: [DEFAULT_SAMPLE_PLAYLIST]
+        };
+        setSettings(initialSettings);
+        setSelectedPlaylistId(DEFAULT_SAMPLE_PLAYLIST.id);
       }
     } else {
-      setSettings(DEFAULT_SETTINGS);
-      setSelectedPlaylistId('');
+      const initialSettings: SavedSettings = {
+        ...DEFAULT_SETTINGS,
+        playlists: [DEFAULT_SAMPLE_PLAYLIST]
+      };
+      setSettings(initialSettings);
+      setSelectedPlaylistId(DEFAULT_SAMPLE_PLAYLIST.id);
     }
 
     // Status bar clock updater
@@ -104,8 +124,14 @@ export default function App() {
 
   // Save states to local storage on edits
   const saveSettings = (newSettings: SavedSettings) => {
-    setSettings(newSettings);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newSettings));
+    try {
+      setSettings(newSettings);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(newSettings));
+    } catch (err) {
+      console.error('Failed to save to localStorage:', err);
+      // Let user know if the storage size is exceeded (common for very large playlists)
+      alert('Local Storage quota exceeded! The playlist metadata might be too large for browser memory. Trying to load a smaller file or URL is recommended.');
+    }
   };
 
   // State update wrapper
@@ -115,10 +141,13 @@ export default function App() {
   };
 
   const handleAddPlaylist = (newPlaylist: Playlist) => {
-    handleUpdateSettings(prev => ({
-      ...prev,
-      playlists: [...prev.playlists, newPlaylist]
-    }));
+    handleUpdateSettings(prev => {
+      const playlists = Array.isArray(prev.playlists) ? prev.playlists : [];
+      return {
+        ...prev,
+        playlists: [...playlists, newPlaylist]
+      };
+    });
     setSelectedPlaylistId(newPlaylist.id);
     setActiveTab('channels');
   };
@@ -127,10 +156,11 @@ export default function App() {
   const handleToggleFavorite = (channel: Channel, playlistId: string) => {
     const favKey = `${playlistId}::${channel.id}`;
     handleUpdateSettings(prev => {
-      const exists = prev.favorites.includes(favKey);
+      const favorites = Array.isArray(prev.favorites) ? prev.favorites : [];
+      const exists = favorites.includes(favKey);
       const nextFavorites = exists 
-        ? prev.favorites.filter(k => k !== favKey)
-        : [...prev.favorites, favKey];
+        ? favorites.filter(k => k !== favKey)
+        : [...favorites, favKey];
       return { ...prev, favorites: nextFavorites };
     });
   };
@@ -141,25 +171,30 @@ export default function App() {
     
     // Add to recents (limit to 5 last entries)
     handleUpdateSettings(prev => {
+      const recents = Array.isArray(prev.recentChannels) ? prev.recentChannels : [];
       // De-duplicate recent URLs
-      const filteredRecents = prev.recentChannels.filter(url => url !== channel.url);
+      const filteredRecents = recents.filter(url => url !== channel.url);
       const nextRecents = [channel.url, ...filteredRecents].slice(0, 5);
       return { ...prev, recentChannels: nextRecents };
     });
   };
 
   const handleUpdateChannelOrder = (playlistId: string, updatedChannels: Channel[]) => {
-    handleUpdateSettings(prev => ({
-      ...prev,
-      playlists: prev.playlists.map(pl => 
-        pl.id === playlistId ? { ...pl, channels: updatedChannels } : pl
-      )
-    }));
+    handleUpdateSettings(prev => {
+      const playlists = Array.isArray(prev.playlists) ? prev.playlists : [];
+      return {
+        ...prev,
+        playlists: playlists.map(pl => 
+          pl.id === playlistId ? { ...pl, channels: updatedChannels } : pl
+        )
+      };
+    });
   };
 
   // Remote URL Sync Pull-to-refresh
   const handleRefreshPlaylist = async (playlistId: string): Promise<void> => {
-    const playlist = settings.playlists.find(p => p.id === playlistId);
+    const playlists = Array.isArray(settings.playlists) ? settings.playlists : [];
+    const playlist = playlists.find(p => p.id === playlistId);
     if (!playlist || playlist.source !== 'url' || !playlist.url) {
       // Just simulate updating delay for files/samples to trigger success UI
       await new Promise(resolve => setTimeout(resolve, 800));
@@ -178,12 +213,15 @@ export default function App() {
       else channels = parseTXT(text);
 
       if (channels.length > 0) {
-        handleUpdateSettings(prev => ({
-          ...prev,
-          playlists: prev.playlists.map(pl => 
-            pl.id === playlistId ? { ...pl, channels, lastUpdated: new Date().toISOString() } : pl
-          )
-        }));
+        handleUpdateSettings(prev => {
+          const prevPlaylists = Array.isArray(prev.playlists) ? prev.playlists : [];
+          return {
+            ...prev,
+            playlists: prevPlaylists.map(pl => 
+              pl.id === playlistId ? { ...pl, channels, lastUpdated: new Date().toISOString() } : pl
+            )
+          };
+        });
       }
     } catch (err) {
       console.error('Remote refresh failed, simulated refresh success applied.');
@@ -198,11 +236,11 @@ export default function App() {
   };
 
   // Seek current playlist navigation channels
-  const currentPlaylist = settings.playlists.find(p => p.id === selectedPlaylistId) || settings.playlists[0];
+  const currentPlaylist = (settings.playlists || []).find(p => p.id === selectedPlaylistId) || settings.playlists?.[0] || DEFAULT_SAMPLE_PLAYLIST;
   
   // Find neighboring channels for Previous/Next track playlist cycling inside ExoPlayer
   const handleNextChannel = () => {
-    if (!activeChannel || !currentPlaylist) return;
+    if (!activeChannel || !currentPlaylist || !Array.isArray(currentPlaylist.channels)) return;
     const idx = currentPlaylist.channels.findIndex(c => c.id === activeChannel.id);
     if (idx !== -1 && idx < currentPlaylist.channels.length - 1) {
       setActiveChannel(currentPlaylist.channels[idx + 1]);
@@ -213,7 +251,7 @@ export default function App() {
   };
 
   const handlePrevChannel = () => {
-    if (!activeChannel || !currentPlaylist) return;
+    if (!activeChannel || !currentPlaylist || !Array.isArray(currentPlaylist.channels)) return;
     const idx = currentPlaylist.channels.findIndex(c => c.id === activeChannel.id);
     if (idx > 0) {
       setActiveChannel(currentPlaylist.channels[idx - 1]);
@@ -225,7 +263,7 @@ export default function App() {
 
   // Filter Favorite channel lists to display
   const favoriteChannelsList: Channel[] = [];
-  if (currentPlaylist) {
+  if (currentPlaylist && Array.isArray(currentPlaylist.channels) && Array.isArray(settings.favorites)) {
     currentPlaylist.channels.forEach(chan => {
       if (settings.favorites.includes(`${selectedPlaylistId}::${chan.id}`)) {
         favoriteChannelsList.push(chan);
@@ -235,16 +273,20 @@ export default function App() {
 
   // Gather active recently played channel references
   const recentChannelsList: Channel[] = [];
-  settings.recentChannels.forEach(url => {
-    // Find matching channel reference in any playlist
-    for (const pl of settings.playlists) {
-      const found = pl.channels.find(c => c.url === url);
-      if (found) {
-        recentChannelsList.push(found);
-        break;
+  if (Array.isArray(settings.recentChannels) && Array.isArray(settings.playlists)) {
+    settings.recentChannels.forEach(url => {
+      // Find matching channel reference in any playlist
+      for (const pl of settings.playlists) {
+        if (pl && Array.isArray(pl.channels)) {
+          const found = pl.channels.find(c => c.url === url);
+          if (found) {
+            recentChannelsList.push(found);
+            break;
+          }
+        }
       }
-    }
-  });
+    });
+  }
 
   return (
     <div id="application_root" className="w-full h-screen bg-stone-50 dark:bg-stone-950 flex flex-col text-stone-900 dark:text-stone-100 select-none overflow-hidden">

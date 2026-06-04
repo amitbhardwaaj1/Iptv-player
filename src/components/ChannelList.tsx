@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Search, Star, ChevronDown, RefreshCw, ArrowUp, ArrowDown, 
   Trash2, Edit, ListFilter, Play, Folder, MoreVertical, Heart, AlertCircle
@@ -29,20 +29,43 @@ export default function ChannelList({
   onRefreshPlaylist
 }: ChannelListProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
   const [showPlaylistDropdown, setShowPlaylistDropdown] = useState(false);
   const [showGroupSelector, setShowGroupSelector] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(80);
   
   // Custom dialog or bottom sheet for channel actions
   const [activeActionChannel, setActiveActionChannel] = useState<{ channel: Channel; playlistId: string } | null>(null);
 
   const playlist = playlists.find(p => p.id === selectedPlaylistId) || playlists[0];
 
-  // Auto-reset group selection when playlist changes
+  // Auto-reset group selection and visible count when playlist changes
   useEffect(() => {
     setSelectedGroup('ALL');
+    setVisibleCount(80);
   }, [selectedPlaylistId]);
+
+  // Debounce search query input to prevent filtering freezes on typing
+  useEffect(() => {
+    if (!searchQuery) {
+      setDebouncedSearchQuery('');
+      return;
+    }
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 180);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [searchQuery]);
+
+  // Reset pagination limit on query or filtering group change
+  useEffect(() => {
+    setVisibleCount(80);
+  }, [debouncedSearchQuery, selectedGroup]);
 
   if (!playlist) {
     return (
@@ -57,16 +80,36 @@ export default function ChannelList({
   }
 
   // Extract unique category groups from current playlist channels
-  const groups = ['ALL', ...Array.from(new Set(playlist.channels.map(c => c.group || 'Uncategorized')))];
+  const groups = useMemo(() => {
+    return ['ALL', ...Array.from(new Set(playlist.channels.map(c => c.group || 'Uncategorized')))];
+  }, [playlist.channels]);
 
   // Filter channels based on Search and Selected Category Group
-  const filteredChannels = playlist.channels
-    .filter(channel => {
-      const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            (channel.group && channel.group.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredChannels = useMemo(() => {
+    const query = debouncedSearchQuery.toLowerCase().trim();
+    return playlist.channels.filter(channel => {
+      const matchesSearch = !query || 
+                            channel.name.toLowerCase().includes(query) || 
+                            (channel.group && channel.group.toLowerCase().includes(query));
       const matchesCategory = selectedGroup === 'ALL' || (channel.group || 'Uncategorized') === selectedGroup;
       return matchesSearch && matchesCategory;
     });
+  }, [playlist.channels, debouncedSearchQuery, selectedGroup]);
+
+  // Paginated/Visible slice of channels for optimized DOM rendering
+  const visibleChannels = useMemo(() => {
+    return filteredChannels.slice(0, visibleCount);
+  }, [filteredChannels, visibleCount]);
+
+  // Load more items when user scrolls near the bottom of `#channel_list_container`
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollHeight - target.scrollTop <= target.clientHeight + 150) {
+      if (visibleCount < filteredChannels.length) {
+        setVisibleCount(prev => prev + 80);
+      }
+    }
+  };
 
   // Handle single tap and double-tap behaviors described in the requirements:
   // "Single tap on a playlist loads its channels. Double tap on the selected playlist name opens a category/group selector for that playlist."
@@ -289,7 +332,7 @@ export default function ChannelList({
       </div>
 
       {/* Channels Catalog Grid/List Container */}
-      <div className="flex-1 overflow-y-auto px-4 pb-12" id="channel_list_container">
+      <div className="flex-1 overflow-y-auto px-4 pb-12" id="channel_list_container" onScroll={handleScroll}>
         {filteredChannels.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-center p-6 bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800/60 shadow-xs mt-2">
             <AlertCircle className="w-10 h-10 text-gray-400 mb-2" />
@@ -300,7 +343,7 @@ export default function ChannelList({
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3 sm:gap-4 pt-2">
-            {filteredChannels.map((chan) => {
+            {visibleChannels.map((chan) => {
               const isFav = favorites.includes(`${playlist.id}::${chan.id}`);
               return (
                 <div
