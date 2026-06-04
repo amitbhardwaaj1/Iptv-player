@@ -75,6 +75,33 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Handle intercepting browser back button when the video player overlay is active
+  useEffect(() => {
+    if (activeChannel) {
+      if (!window.history.state || !window.history.state.playerOpen) {
+        window.history.pushState({ playerOpen: true }, '');
+      }
+    }
+
+    const handlePopState = (e: PopStateEvent) => {
+      // If back/gesture is triggered, close the player overlay if open
+      setActiveChannel(null);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [activeChannel]);
+
+  // Handle closing player manually from UI buttons (back arrow, cancel, etc.)
+  const handleClosePlayer = () => {
+    setActiveChannel(null);
+    if (window.history.state && window.history.state.playerOpen) {
+      window.history.back();
+    }
+  };
+
   // Save states to local storage on edits
   const saveSettings = (newSettings: SavedSettings) => {
     setSettings(newSettings);
@@ -234,7 +261,7 @@ export default function App() {
             <IPTVPlayer
               channel={activeChannel}
               allChannels={currentPlaylist?.channels || []}
-              onClose={() => setActiveChannel(null)}
+              onClose={handleClosePlayer}
               onNextChannel={handleNextChannel}
               onPrevChannel={handlePrevChannel}
               onSelectChannel={(chan) => setActiveChannel(chan)}

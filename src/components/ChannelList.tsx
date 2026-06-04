@@ -34,12 +34,8 @@ export default function ChannelList({
   const [showGroupSelector, setShowGroupSelector] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Custom dialog or bottom sheet for long-pressed channel actions
+  // Custom dialog or bottom sheet for channel actions
   const [activeActionChannel, setActiveActionChannel] = useState<{ channel: Channel; playlistId: string } | null>(null);
-
-  // Long press timer references
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isLongPressActive = useRef(false);
 
   const playlist = playlists.find(p => p.id === selectedPlaylistId) || playlists[0];
 
@@ -100,26 +96,6 @@ export default function ChannelList({
       console.error(err);
     } finally {
       setIsRefreshing(false);
-    }
-  };
-
-  // Long press emulator
-  const handleChannelTouchStart = (channel: Channel, playlistId: string) => {
-    isLongPressActive.current = false;
-    longPressTimerRef.current = setTimeout(() => {
-      isLongPressActive.current = true;
-      setActiveActionChannel({ channel, playlistId });
-      // Trigger subtle phone vibrator simulator sound/visual cue
-    }, 600); // 600ms hold triggers the action sheet
-  };
-
-  const handleChannelTouchEnd = (channel: Channel) => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-    }
-    if (!isLongPressActive.current) {
-      // It's a standard tap, play the channel
-      onPlayChannel(channel);
     }
   };
 
@@ -323,21 +299,41 @@ export default function ChannelList({
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3 sm:gap-4 pt-2">
             {filteredChannels.map((chan) => {
               const isFav = favorites.includes(`${playlist.id}::${chan.id}`);
               return (
                 <div
                   id={`channel_card_${chan.id}`}
                   key={chan.id}
-                  onTouchStart={() => handleChannelTouchStart(chan, playlist.id)}
-                  onTouchEnd={() => handleChannelTouchEnd(chan)}
-                  onMouseDown={() => handleChannelTouchStart(chan, playlist.id)}
-                  onMouseUp={() => handleChannelTouchEnd(chan)}
-                  className="group relative flex items-center justify-between p-3.5 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 hover:border-emerald-500/45 dark:hover:border-emerald-500/40 rounded-2xl cursor-pointer active:scale-98 transform hover:-translate-y-0.5 hover:shadow-xs transition-all select-none"
-                  title="Direct-click to play Stream. Hold-down (long press) to configure orders & favorites"
+                  onClick={() => onPlayChannel(chan)}
+                  className="group relative flex flex-col items-center justify-between p-3 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 hover:border-emerald-500/45 dark:hover:border-emerald-500/40 rounded-2xl cursor-pointer hover:-translate-y-1 hover:shadow-md transition-all select-none text-center"
+                  title="Click to play Stream"
                 >
-                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                  {/* Top action/status line */}
+                  <div className="w-full flex items-center justify-between mb-1">
+                    <div className="w-4 h-4 flex items-center justify-center">
+                      {isFav && (
+                        <Star className="w-4.5 h-4.5 text-amber-500 fill-current animate-pulse" />
+                      )}
+                    </div>
+                    
+                    {/* Triple-dot settings button */}
+                    <button
+                      id={`btn_config_chan_${chan.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveActionChannel({ channel: chan, playlistId: playlist.id });
+                      }}
+                      className="p-1 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 transition-colors"
+                      title="Manage Channel"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Centered logo */}
+                  <div className="flex-1 flex items-center justify-center my-2 max-h-16">
                     {chan.logo ? (
                       <img 
                         src={chan.logo} 
@@ -345,42 +341,21 @@ export default function ChannelList({
                         onError={(e) => {
                           (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(chan.name.slice(0, 2))}&background=random&color=fff&size=128&bold=true`;
                         }}
-                        className="w-12 h-12 rounded-xl object-contain bg-stone-50 dark:bg-stone-950 p-1.5 border border-stone-100 dark:border-stone-800 shadow-inner"
+                        className="w-14 h-14 rounded-xl object-contain bg-stone-50 dark:bg-stone-950 p-1.5 border border-stone-100 dark:border-stone-800 shadow-xs group-hover:scale-105 transition-transform"
                         referrerPolicy="no-referrer"
                       />
                     ) : (
-                      <div className="w-12 h-12 bg-emerald-500/10 text-emerald-600 rounded-xl font-bold flex items-center justify-center">
+                      <div className="w-14 h-14 bg-emerald-500/10 text-emerald-600 rounded-xl font-bold flex items-center justify-center text-lg shadow-xs group-hover:scale-105 transition-transform">
                         {chan.name.slice(0, 2)}
                       </div>
                     )}
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-gray-950 dark:text-stone-50 text-sm truncate group-hover:text-emerald-500 transition-colors">
-                        {chan.name}
-                      </p>
-                      <p className="text-[10px] text-gray-400 dark:text-stone-500 font-medium uppercase tracking-wide truncate mt-0.5">
-                        {chan.group || 'Uncategorized'}
-                      </p>
-                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1">
-                    {isFav && (
-                      <Star className="w-4.5 h-4.5 text-amber-500 fill-current animate-pulse" />
-                    )}
-                    
-                    {/* Triple-dot settings button as accessibility fallback / desktop option */}
-                    <button
-                      id={`btn_config_chan_${chan.id}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-                        setActiveActionChannel({ channel: chan, playlistId: playlist.id });
-                      }}
-                      className="p-1 px-2 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 transition-colors"
-                      title="Manage Channel"
-                    >
-                      <MoreVertical className="w-4 h-4" />
-                    </button>
+                  {/* Channel details underneath */}
+                  <div className="w-full mt-1.5">
+                    <p className="font-semibold text-gray-950 dark:text-stone-550 text-xs line-clamp-2 px-1 group-hover:text-emerald-500 dark:group-hover:text-emerald-450 transition-colors leading-tight min-h-[32px] flex items-center justify-center">
+                      {chan.name}
+                    </p>
                   </div>
                 </div>
               );
