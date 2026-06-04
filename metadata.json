@@ -1,0 +1,6 @@
+{
+  "name": "IPTV Player",
+  "description": "A modern Material Design 3 IPTV Player.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
